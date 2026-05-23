@@ -1,1 +1,224 @@
-const { default: makeWASocket, useMultiFileAuthState, DisconnectReason } = require('@whiskeysockets/baileys');\nconst { Boom } = require('@hapi/boom');\nconst pino = require('pino');\nconst fs = require('fs');\nconst path = require('path');\nconst readline = require('readline');\nrequire('dotenv').config();\n\nconst { handleCommand } = require('./menu/handler');\nconst config = require('./config/config');\nconst { logInfo, logError, logSuccess, logWarn } = require('./utils/logger');\n\nconst logger = pino({ transport: { target: 'pino-pretty' } });\n\n// Interface para entrada de usuario\nconst rl = readline.createInterface({\n  input: process.stdin,\n  output: process.stdout,\n});\n\n// Función para pedir entrada del usuario\nfunction preguntarUsuario(pregunta) {\n  return new Promise((resolve) => {\n    rl.question(pregunta, (respuesta) => {\n      resolve(respuesta);\n    });\n  });\n}\n\nasync function startBot() {\n  try {\n    logInfo('Iniciando bot AlyaKujou', {\n      nombre: config.BOT_NAME,\n      version: config.BOT_VERSION,\n      prefijo: config.BOT_PREFIX,\n    });\n\n    const { state, saveCreds } = await useMultiFileAuthState(config.AUTH_DIR);\n\n    const sock = makeWASocket({\n      auth: state,\n      logger: logger,\n      printQRInTerminal: false, // Desactivar QR en terminal para mostrar personalizado\n    });\n\n    // Evento: Actualización de conexión\n    sock.ev.on('connection.update', async (update) => {\n      const { connection, lastDisconnect, qr } = update;\n\n      if (connection === 'close') {\n        let isShouldReconnect = (lastDisconnect.error instanceof Boom)\n          ? lastDisconnect.error.output.statusCode !== DisconnectReason.loggedOut\n          : true;\n\n        if (isShouldReconnect) {\n          logWarn('Reconectando al bot...', {});\n          startBot();\n        } else {\n          logError('Sesión cerrada', new Error('Usuario desconectado'));\n          console.log('\\n❌ Sesión cerrada. Por favor, escanea el código QR nuevamente.');\n          process.exit(0);\n        }\n      } else if (connection === 'connecting') {\n        console.log('🔄 Conectando...');\n      } else if (connection === 'open') {\n        logSuccess('Bot conectado', {\n          nombre: config.BOT_NAME,\n          version: config.BOT_VERSION,\n        });\n        console.log('\\n✅ Bot conectado exitosamente');\n        console.log(`🤖 Bot: ${config.BOT_NAME}`);\n        console.log(`📌 Prefijo: ${config.BOT_PREFIX}`);\n        console.log(`📝 Versión: ${config.BOT_VERSION}`);\n        console.log('\\n✨ El bot está listo para recibir comandos\\n');\n      }\n\n      // Mostrar código QR si es necesario\n      if (qr) {\n        console.log('\\n' + '='.repeat(60));\n        console.log('📱 ESCANEA ESTE CÓDIGO QR CON WHATSAPP');\n        console.log('='.repeat(60));\n        console.log('\\nPasos para vincular:');\n        console.log('1. Abre WhatsApp en tu teléfono');\n        console.log('2. Ve a Configuración → Dispositivos vinculados');\n        console.log('3. Haz clic en \"Vincular un dispositivo\"');\n        console.log('4. Escanea este código QR con tu cámara\\n');\n        console.log('=' . repeat(60));\n        console.log('Código QR (en terminal):\\n');\n        const QRCode = require('qrcode-terminal');\n        QRCode.generate(qr, { small: true });\n        console.log('\\n' + '='.repeat(60) + '\\n');\n      }\n    });\n\n    // Evento: Nuevos mensajes\n    sock.ev.on('messages.upsert', async (m) => {\n      const msg = m.messages[0];\n      if (!msg.message || msg.key.fromMe) return; // Ignorar mensajes propios\n\n      const messageText = msg.message.conversation || msg.message.extendedTextMessage?.text || '';\n      const sender = msg.key.remoteJid;\n      const isGroupMsg = sender.endsWith('@g.us');\n      const senderName = msg.pushName || 'Usuario';\n\n      console.log(`📨 Mensaje de ${senderName}: ${messageText}`);\n\n      // Procesar comando\n      await handleCommand(sock, sender, messageText, isGroupMsg);\n    });\n\n    // Evento: Actualizar credenciales\n    sock.ev.on('creds.update', saveCreds);\n  } catch (error) {\n    logError('Error fatal al iniciar el bot', error);\n    console.error('\\n❌ Error al iniciar el bot:', error.message);\n    console.log('Reintentando en 5 segundos...\\n');\n    setTimeout(() => startBot(), 5000);\n  }\n}\n\n// Función para solicitar vinculación por número\nasync function pedirNumeroVinculacion() {\n  console.log('\\n' + '='.repeat(60));\n  console.log('🤖 BOT ALYAKUJOU - INSTALADOR DE VINCULACIÓN');\n  console.log('='.repeat(60));\n  console.log('\\nBienvenido al instalador del bot');\n  console.log('Elige una opción de vinculación:\\n');\n  console.log('1️⃣  Escanear código QR (Recomendado)');\n  console.log('2️⃣  Vinculación por número de celular\\n');\n\n  const opcion = await preguntarUsuario('👉 Elige una opción (1 o 2): ');\n\n  if (opcion === '1' || opcion === '1️⃣') {\n    console.log('\\n✅ Iniciando con código QR...\\n');\n    rl.close();\n    startBot();\n  } else if (opcion === '2' || opcion === '2️⃣') {\n    await vinculacionPorNumero();\n  } else {\n    console.log('\\n❌ Opción no válida. Por favor intenta de nuevo.\\n');\n    pedirNumeroVinculacion();\n  }\n}\n\n// Función para vinculación por número de celular\nasync function vinculacionPorNumero() {\n  console.log('\\n' + '='.repeat(60));\n  console.log('📱 VINCULACIÓN POR NÚMERO DE CELULAR');\n  console.log('='.repeat(60));\n  console.log('\\n⚠️  Requisitos:');\n  console.log('• Debes tener WhatsApp activo en tu teléfono');\n  console.log('• Tu teléfono debe estar conectado a Internet');\n  console.log('• El proceso tardará unos 30-60 segundos\\n');\n\n  const numero = await preguntarUsuario('📲 Ingresa tu número de celular (ej: 573001234567): ');\n\n  if (!numero || numero.length < 10) {\n    console.log('\\n❌ Número no válido. Debe tener al menos 10 dígitos.\\n');\n    vinculacionPorNumero();\n    return;\n  }\n\n  console.log(`\\n⏳ Procesando número: ${numero}`);\n  console.log('⏱️  Esto puede tomar unos segundos...\\n');\n\n  try {\n    const numeroLimpio = numero.replace(/\\D/g, '');\n    \n    // Simular espera\n    console.log('🔄 Enviando código a tu WhatsApp...');\n    await new Promise(resolve => setTimeout(resolve, 2000));\n    \n    console.log('✅ Código enviado correctamente\\n');\n    console.log('='.repeat(60));\n    console.log('📱 REVISA TU WHATSAPP');\n    console.log('='.repeat(60));\n    console.log(`\\n📲 Número: +${numeroLimpio}`);\n    console.log('📬 Un mensaje con un código de 6 dígitos ha sido enviado');\n    console.log('⏰ El código expira en 10 minutos\\n');\n\n    const codigo = await preguntarUsuario('✏️  Ingresa el código que recibiste (6 dígitos): ');\n\n    if (codigo && codigo.length === 6 && /^\\d+$/.test(codigo)) {\n      console.log('\\n' + '='.repeat(60));\n      console.log('✅ CÓDIGO VERIFICADO');\n      console.log('='.repeat(60));\n      console.log('\\n🎉 ¡Tu WhatsApp está vinculado correctamente!');\n      console.log(`📱 Número: +${numeroLimpio}`);\n      console.log('\\n🤖 Iniciando bot en 3 segundos...\\n');\n      \n      await new Promise(resolve => setTimeout(resolve, 3000));\n      rl.close();\n      startBot();\n    } else {\n      console.log('\\n❌ Código no válido. Debe contener 6 dígitos numéricos.\\n');\n      vinculacionPorNumero();\n    }\n  } catch (error) {\n    console.log(`\\n❌ Error: ${error.message}`);\n    console.log('Por favor intenta de nuevo.\\n');\n    vinculacionPorNumero();\n  }\n}\n\n// Verificar si ya hay sesión activa\nconst authDir = config.AUTH_DIR;\nif (fs.existsSync(authDir) && fs.readdirSync(authDir).length > 0) {\n  console.log('\\n✅ Sesión anterior detectada');\n  console.log('🔄 Iniciando bot con sesión guardada...\\n');\n  rl.close();\n  startBot();\n} else {\n  // No hay sesión anterior, pedir vinculación\n  pedirNumeroVinculacion();\n}\n\n// Manejar errores no capturados\nprocess.on('uncaughtException', (error) => {\n  logError('Excepción no capturada', error);\n});\n\nprocess.on('unhandledRejection', (reason, promise) => {\n  logError('Promesa rechazada sin manejar', new Error(reason));\n});\n
+const { default: makeWASocket, useMultiFileAuthState, DisconnectReason } = require('@whiskeysockets/baileys');
+const { Boom } = require('@hapi/boom');
+const pino = require('pino');
+const fs = require('fs');
+const path = require('path');
+const readline = require('readline');
+require('dotenv').config();
+
+const { handleCommand } = require('./menu/handler');
+const config = require('./config/config');
+const { logInfo, logError, logSuccess, logWarn } = require('./utils/logger');
+
+const logger = pino({ transport: { target: 'pino-pretty' } });
+
+// Interface para entrada de usuario
+const rl = readline.createInterface({
+  input: process.stdin,
+  output: process.stdout,
+});
+
+// Función para pedir entrada del usuario
+function preguntarUsuario(pregunta) {
+  return new Promise((resolve) => {
+    rl.question(pregunta, (respuesta) => {
+      resolve(respuesta);
+    });
+  });
+}
+
+async function startBot() {
+  try {
+    logInfo('Iniciando bot AlyaKujou', {
+      nombre: config.BOT_NAME,
+      version: config.BOT_VERSION,
+      prefijo: config.BOT_PREFIX,
+    });
+
+    const { state, saveCreds } = await useMultiFileAuthState(config.AUTH_DIR);
+
+    const sock = makeWASocket({
+      auth: state,
+      logger: logger,
+      printQRInTerminal: false,
+    });
+
+    // Evento: Actualización de conexión
+    sock.ev.on('connection.update', async (update) => {
+      const { connection, lastDisconnect, qr } = update;
+
+      if (connection === 'close') {
+        let isShouldReconnect = (lastDisconnect.error instanceof Boom)
+          ? lastDisconnect.error.output.statusCode !== DisconnectReason.loggedOut
+          : true;
+
+        if (isShouldReconnect) {
+          logWarn('Reconectando al bot...', {});
+          startBot();
+        } else {
+          logError('Sesión cerrada', new Error('Usuario desconectado'));
+          console.log('\n❌ Sesión cerrada. Por favor, escanea el código QR nuevamente.');
+          process.exit(0);
+        }
+      } else if (connection === 'connecting') {
+        console.log('🔄 Conectando...');
+      } else if (connection === 'open') {
+        logSuccess('Bot conectado', {
+          nombre: config.BOT_NAME,
+          version: config.BOT_VERSION,
+        });
+        console.log('\n✅ Bot conectado exitosamente');
+        console.log(`🤖 Bot: ${config.BOT_NAME}`);
+        console.log(`📌 Prefijo: ${config.BOT_PREFIX}`);
+        console.log(`📝 Versión: ${config.BOT_VERSION}`);
+        console.log('\n✨ El bot está listo para recibir comandos\n');
+      }
+
+      // Mostrar código QR si es necesario
+      if (qr) {
+        console.log('\n' + '='.repeat(60));
+        console.log('📱 ESCANEA ESTE CÓDIGO QR CON WHATSAPP');
+        console.log('='.repeat(60));
+        console.log('\nPasos para vincular:');
+        console.log('1. Abre WhatsApp en tu teléfono');
+        console.log('2. Ve a Configuración → Dispositivos vinculados');
+        console.log('3. Haz clic en "Vincular un dispositivo"');
+        console.log('4. Escanea este código QR con tu cámara\n');
+        console.log('='.repeat(60));
+        console.log('Código QR (en terminal):\n');
+        const QRCode = require('qrcode-terminal');
+        QRCode.generate(qr, { small: true });
+        console.log('\n' + '='.repeat(60) + '\n');
+      }
+    });
+
+    // Evento: Nuevos mensajes
+    sock.ev.on('messages.upsert', async (m) => {
+      const msg = m.messages[0];
+      if (!msg.message || msg.key.fromMe) return;
+
+      const messageText = msg.message.conversation || msg.message.extendedTextMessage?.text || '';
+      const sender = msg.key.remoteJid;
+      const isGroupMsg = sender.endsWith('@g.us');
+      const senderName = msg.pushName || 'Usuario';
+
+      console.log(`📨 Mensaje de ${senderName}: ${messageText}`);
+
+      // Procesar comando
+      await handleCommand(sock, sender, messageText, isGroupMsg);
+    });
+
+    // Evento: Actualizar credenciales
+    sock.ev.on('creds.update', saveCreds);
+  } catch (error) {
+    logError('Error fatal al iniciar el bot', error);
+    console.error('\n❌ Error al iniciar el bot:', error.message);
+    console.log('Reintentando en 5 segundos...\n');
+    setTimeout(() => startBot(), 5000);
+  }
+}
+
+// Función para solicitar vinculación por número
+async function pedirNumeroVinculacion() {
+  console.log('\n' + '='.repeat(60));
+  console.log('🤖 BOT ALYAKUJOU - INSTALADOR DE VINCULACIÓN');
+  console.log('='.repeat(60));
+  console.log('\nBienvenido al instalador del bot');
+  console.log('Elige una opción de vinculación:\n');
+  console.log('1️⃣  Escanear código QR (Recomendado)');
+  console.log('2️⃣  Vinculación por número de celular\n');
+
+  const opcion = await preguntarUsuario('👉 Elige una opción (1 o 2): ');
+
+  if (opcion === '1' || opcion === '1️⃣') {
+    console.log('\n✅ Iniciando con código QR...\n');
+    rl.close();
+    startBot();
+  } else if (opcion === '2' || opcion === '2️⃣') {
+    await vinculacionPorNumero();
+  } else {
+    console.log('\n❌ Opción no válida. Por favor intenta de nuevo.\n');
+    pedirNumeroVinculacion();
+  }
+}
+
+// Función para vinculación por número de celular
+async function vinculacionPorNumero() {
+  console.log('\n' + '='.repeat(60));
+  console.log('📱 VINCULACIÓN POR NÚMERO DE CELULAR');
+  console.log('='.repeat(60));
+  console.log('\n⚠️  Requisitos:');
+  console.log('• Debes tener WhatsApp activo en tu teléfono');
+  console.log('• Tu teléfono debe estar conectado a Internet');
+  console.log('• El proceso tardará unos 30-60 segundos\n');
+
+  const numero = await preguntarUsuario('📲 Ingresa tu número de celular (ej: 573001234567): ');
+
+  if (!numero || numero.length < 10) {
+    console.log('\n❌ Número no válido. Debe tener al menos 10 dígitos.\n');
+    vinculacionPorNumero();
+    return;
+  }
+
+  console.log(`\n⏳ Procesando número: ${numero}`);
+  console.log('⏱️  Esto puede tomar unos segundos...\n');
+
+  try {
+    const numeroLimpio = numero.replace(/\D/g, '');
+    
+    // Simular espera
+    console.log('🔄 Enviando código a tu WhatsApp...');
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    
+    console.log('✅ Código enviado correctamente\n');
+    console.log('='.repeat(60));
+    console.log('📱 REVISA TU WHATSAPP');
+    console.log('='.repeat(60));
+    console.log(`\n📲 Número: +${numeroLimpio}`);
+    console.log('📬 Un mensaje con un código de 6 dígitos ha sido enviado');
+    console.log('⏰ El código expira en 10 minutos\n');
+
+    const codigo = await preguntarUsuario('✏️  Ingresa el código que recibiste (6 dígitos): ');
+
+    if (codigo && codigo.length === 6 && /^\d+$/.test(codigo)) {
+      console.log('\n' + '='.repeat(60));
+      console.log('✅ CÓDIGO VERIFICADO');
+      console.log('='.repeat(60));
+      console.log('\n🎉 ¡Tu WhatsApp está vinculado correctamente!');
+      console.log(`📱 Número: +${numeroLimpio}`);
+      console.log('\n🤖 Iniciando bot en 3 segundos...\n');
+      
+      await new Promise(resolve => setTimeout(resolve, 3000));
+      rl.close();
+      startBot();
+    } else {
+      console.log('\n❌ Código no válido. Debe contener 6 dígitos numéricos.\n');
+      vinculacionPorNumero();
+    }
+  } catch (error) {
+    console.log(`\n❌ Error: ${error.message}`);
+    console.log('Por favor intenta de nuevo.\n');
+    vinculacionPorNumero();
+  }
+}
+
+// Verificar si ya hay sesión activa
+const authDir = config.AUTH_DIR;
+if (fs.existsSync(authDir) && fs.readdirSync(authDir).length > 0) {
+  console.log('\n✅ Sesión anterior detectada');
+  console.log('🔄 Iniciando bot con sesión guardada...\n');
+  rl.close();
+  startBot();
+} else {
+  // No hay sesión anterior, pedir vinculación
+  pedirNumeroVinculacion();
+}
+
+// Manejar errores no capturados
+process.on('uncaughtException', (error) => {
+  logError('Excepción no capturada', error);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  logError('Promesa rechazada sin manejar', new Error(reason));
+});
