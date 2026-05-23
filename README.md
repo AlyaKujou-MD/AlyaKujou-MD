@@ -1,81 +1,41 @@
-# AlyaKujou WhatsApp Bot 🤖
+<div align="center">
 
-Bot de WhatsApp basado en Baileys con funcionalidades personalizables.
+<img src="https://i.postimg.cc/RZb645y8/IMG-20260523-WA0192.jpg" width="250" style="border-radius:20px;">
 
-## 📋 Tabla de Contenidos
+<h1 align="center">
+  <img 
+    src="https://readme-typing-svg.demolab.com?font=Poppins&size=35&pause=1000&color=FFB6D9&center=true&vCenter=true&width=500&lines=AlyaKujou-MD"
+    alt="Typing SVG"
+  />
+</h1>
 
-- [Instalación](#instalación)
-- [Uso](#uso)
-- [Comandos](#comandos-disponibles)
-- [Estructura](#estructura-del-proyecto)
-- [Instalación en Termux](#instalación-en-termux)
+<p align="center">
+Bot MultiDispositivo para WhatsApp con IA, descargas y automatización.
+</p>
 
-## 📦 Instalación
+</div>
 
-### Requisitos
-- Node.js v14 o superior
-- npm o yarn
+---
+
+## ✨ Características
+
+- 🤖 Inteligencia Artificial
+- 🎵 Descarga de música
+- 📌 Pinterest Search
+- 🖼️ Stickers
+- ⚡ Alta velocidad
+- 🧠 Sistema Multi Device
+- 🔥 Plugins
+- ☁️ Conexión estable
+
+---
+
+## 🚀 Instalación
 
 ```bash
+pkg update && pkg upgrade
+pkg install git nodejs ffmpeg imagemagick
+git clone https://github.com/AlyaKujou-MD/AlyaKujou-MD
+cd AlyaKujou-MD
 npm install
-```
-
-## 🚀 Uso
-
-```bash
-npm start
-```
-
-Para desarrollo con recarga automática:
-
-```bash
-npm run dev
-```
-
-**Primeros pasos:**
-1. Ejecuta `npm start`
-2. Escanea el código QR con WhatsApp
-3. El bot estará listo para recibir comandos
-
-## 💬 Comandos disponibles
-
-Ver la lista completa en [menu/menu.js](menu/menu.js)
-
-## 📁 Estructura del proyecto
-
-```
-.
-├── index.js                  # Archivo principal
-├── package.json              # Dependencias
-├── .env.example              # Template de variables
-├── .gitignore                # Archivos ignorados
-├── README.md                 # Este archivo
-├── TERMUX.md                 # Guía de instalación en Termux
-├── menu/
-│   └── menu.js              # Sistema de menú y comandos
-└── auth_info_baileys/        # Credenciales (generadas automáticamente)
-```
-
-## ⚙️ Configuración
-
-Crea un archivo `.env` basado en `.env.example`:
-
-```bash
-cp .env.example .env
-```
-
-Edita `.env` con tus configuraciones:
-
-```env
-BOT_NAME=AlyaKujou
-BOT_PREFIX=!
-DEBUG=false
-```
-
-## 📱 Instalación en Termux
-
-Para instalación detallada en Termux, consulta [TERMUX.md](TERMUX.md)
-
-## 📄 Licencia
-
-MIT
+node index.js
